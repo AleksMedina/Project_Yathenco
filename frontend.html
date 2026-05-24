@@ -5,17 +5,20 @@
     <title>AR Emotion System</title>
     <style>
         :root {
-            --primary: #2563eb;
-            --primary-glow: rgba(37, 99, 235, 0.4);
-            --bg-glass: rgba(255, 255, 255, 0.85);
-            --text-main: #1e293b;
+            /* Светлая минималистичная палитра */
+            --primary: #3b82f6;
+            --primary-glow: rgba(59, 130, 246, 0.3);
+            --bg-glass: rgba(255, 255, 255, 0.9);
+            --text-main: #0f172a;
             --text-muted: #64748b;
+            --success: #10b981;
+            --danger: #ef4444;
         }
 
-        body, html { 
-            margin: 0; padding: 0; width: 100%; height: 100%; 
-            font-family: 'Segoe UI', Roboto, Helvetica, sans-serif; 
-            overflow: hidden; background: #000;
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            font-family: 'Segoe UI', Roboto, Helvetica, sans-serif;
+            overflow: hidden; background: #f8fafc; /* Светлый фон вместо черного */
         }
 
         /* Полноэкранное видео */
@@ -23,90 +26,93 @@
             position: fixed; top: 0; left: 0;
             width: 100vw; height: 100vh;
             z-index: 1; display: flex; justify-content: center; align-items: center;
+            background: #f8fafc; /* Фон, который остается при выключенной камере */
         }
-        
+
         #video {
             width: 100vw; height: 100vh;
-            object-fit: cover; /* Растягивает без сплющивания */
+            object-fit: cover;
             transform: scaleX(-1); /* Зеркальность */
+            transition: opacity 0.5s ease; /* Плавное появление/исчезновение */
+            opacity: 0; /* По умолчанию скрыто */
         }
 
-        /* AR-Рамка лица */
-        #face-box {
-            position: fixed; 
-            border: 2px solid var(--primary);
-            box-shadow: 0 0 15px var(--primary-glow), inset 0 0 10px var(--primary-glow);
-            border-radius: 8px; pointer-events: none; display: none; z-index: 5;
-            transition: all 0.08s linear;
+        /* Контейнер для динамических лиц */
+        #faces-container {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 5;
         }
 
-        /* Угловые маркеры для крутости */
-        #face-box::before, #face-box::after {
-            content: ''; position: absolute; width: 20px; height: 20px;
-            border: 3px solid #fff; pointer-events: none;
+        /* Динамическая AR-Рамка */
+        .face-box {
+            position: absolute;
+            border: 3px solid var(--primary); /* Утолщенная рамка для больших экранов */
+            box-shadow: 0 0 20px var(--primary-glow);
+            border-radius: 12px;
+            /* transition: all 0.1s ease-out; */ /* Плавное движение рамки */
         }
-        #face-box::before { top: -4px; left: -4px; border-right: none; border-bottom: none; }
-        #face-box::after { bottom: -4px; right: -4px; border-left: none; border-top: none; }
+
+        .face-box::before, .face-box::after {
+            content: ''; position: absolute; width: 24px; height: 24px;
+            border: 4px solid #fff; pointer-events: none; border-radius: 4px;
+        }
+        .face-box::before { top: -6px; left: -6px; border-right: none; border-bottom: none; }
+        .face-box::after { bottom: -6px; right: -6px; border-left: none; border-top: none; }
 
         /* HUD Надпись рядом с лицом */
-        #face-hud {
+        .face-hud {
             position: absolute;
-            top: 10%; left: calc(100% + 20px); 
-            background: var(--bg-glass); backdrop-filter: blur(10px);
-            border-left: 4px solid var(--primary);
-            padding: 12px 16px; border-radius: 6px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.15);
-            min-width: 160px; display: flex; flex-direction: column; gap: 4px;
+            top: 10%; left: calc(100% + 24px);
+            background: var(--bg-glass); backdrop-filter: blur(16px);
+            border-left: 6px solid var(--primary);
+            padding: 16px 20px; border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+            min-width: 220px; display: flex; flex-direction: column; gap: 6px;
         }
-        .hud-id { font-size: 10px; font-weight: 700; color: var(--text-muted); letter-spacing: 1.5px; }
-        .hud-emotion { font-size: 22px; font-weight: 800; color: var(--primary); margin: 0; }
-        .hud-phrase { font-size: 13px; font-weight: 600; color: var(--text-main); font-style: italic; }
+        .hud-id { font-size: 12px; font-weight: 700; color: var(--text-muted); letter-spacing: 1.5px; }
+        .hud-emotion { font-size: 28px; font-weight: 800; color: var(--primary); margin: 0; line-height: 1.1; }
+        .hud-phrase { font-size: 15px; font-weight: 600; color: var(--text-main); font-style: italic; }
 
         /* Парящая панель статистики */
         .dashboard-card {
-            position: fixed; bottom: 30px; right: 30px; z-index: 10;
-            background: var(--bg-glass); backdrop-filter: blur(12px);
-            border: 1px solid rgba(255,255,255,0.5); border-radius: 16px;
-            padding: 24px; box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
-            width: 320px; color: var(--text-main);
+            position: fixed; bottom: 40px; right: 40px; z-index: 10;
+            background: var(--bg-glass); backdrop-filter: blur(20px);
+            border: 1px solid rgba(255,255,255,0.8); border-radius: 20px;
+            padding: 28px; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            width: 360px; color: var(--text-main);
         }
 
-        .stats-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-        .btn-start { 
-            background: var(--primary); color: white; border: none; padding: 10px 20px; 
-            border-radius: 8px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 10px var(--primary-glow);
+        .stats-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+        .btn-start {
+            background: var(--primary); color: white; border: none; padding: 12px 24px;
+            border-radius: 10px; font-size: 16px; font-weight: 700; cursor: pointer;
+            box-shadow: 0 6px 15px var(--primary-glow); transition: transform 0.1s;
         }
-        
-        .emotion-row { margin-bottom: 12px; }
-        .row-info { display: flex; justify-content: space-between; font-size: 0.9rem; margin-bottom: 4px; font-weight: 600; }
-        .progress-bar { height: 6px; background: rgba(0,0,0,0.1); border-radius: 4px; overflow: hidden; }
-        .progress-fill { height: 100%; background: var(--primary); width: 0%; transition: width 0.2s ease; }
+        .btn-start:active { transform: scale(0.97); }
+
+        .emotion-row { margin-bottom: 14px; }
+        .row-info { display: flex; justify-content: space-between; font-size: 1rem; margin-bottom: 6px; font-weight: 700; }
+        .progress-bar { height: 8px; background: rgba(0,0,0,0.05); border-radius: 6px; overflow: hidden; }
+        .progress-fill { height: 100%; background: var(--primary); width: 0%; transition: width 0.2s ease-out; }
     </style>
 </head>
 <body>
 
     <div class="video-wrapper">
         <video id="video" autoplay playsinline></video>
-        
-        <div id="face-box">
-            <div id="face-hud">
-                <span class="hud-id">СУБЪЕКТ 01 • <span id="hud-conf">0%</span></span>
-                <span id="hud-emotion" class="hud-emotion">ПОИСК...</span>
-                <span id="hud-phrase" class="hud-phrase">Анализирую данные</span>
-            </div>
-        </div>
+        <div id="faces-container"></div>
     </div>
 
     <div class="dashboard-card">
         <div class="stats-header">
-            <button class="btn-start" id="startBtn">Старт сканирования</button>
-            <div id="status" style="font-size: 12px; font-weight: 700; color: #ef4444;">● OFFLINE</div>
+            <button class="btn-start" id="startBtn">Старт системы</button>
+            <div id="status" style="font-size: 14px; font-weight: 800; color: var(--danger);">● OFFLINE</div>
         </div>
         <div id="emotion-list"></div>
     </div>
 
     <script>
-        // Словари
         const translations = {
             'neutral': 'Спокойствие', 'happy': 'Радость', 'surprise': 'Удивление',
             'sad': 'Грусть', 'angry': 'Злость', 'disgust': 'Отвращение',
@@ -114,37 +120,32 @@
         };
 
         const phrases = {
-            'neutral': 'Спокойствие. Только кофе. И никаких дедлайнов.', 'happy': 'Стипендия пришла! Гуляем', 
-            'surprise': 'Это что, автомат?!', 'sad': 'Система висит, я тоже.', 
-            'angry': 'Всё. Хватит. Ухожу в лес, жить с белками.', 'disgust': 'Это не кофе, это слезы первокурсника.',
-            'fear': 'Система на защите 🛡️', 'contempt': 'Твои аргументы слабее моей отмазки.'
+            'neutral': 'Только кофе. И никаких дедлайнов.', 'happy': 'Код скомпилировался с первого раза!',
+            'surprise': 'Это что, автомат?!', 'sad': 'Ошибка сегментации...',
+            'angry': 'Опять этот баг с плавающей точкой.', 'disgust': 'Грязный хак в коде.',
+            'fear': 'Завтра дедлайн по лабе 🛡️', 'contempt': 'Твои аргументы слабее моей отмазки.'
         };
 
         const video = document.getElementById('video');
         const startBtn = document.getElementById('startBtn');
-        const faceBox = document.getElementById('face-box');
-        
-        const hudEmotion = document.getElementById('hud-emotion');
-        const hudPhrase = document.getElementById('hud-phrase');
-        const hudConf = document.getElementById('hud-conf');
-        
+        const facesContainer = document.getElementById('faces-container');
         const statusEl = document.getElementById('status');
         const emotionList = document.getElementById('emotion-list');
 
-        // Автоматически определяем адрес сервера
-        const backendPort = "8000"; // Порт твоего бэкенда
-        const host = window.location.hostname; // Это будет 127.0.0.1 или IP твоего компа
+        const backendPort = "8000";
+        const host = window.location.hostname || "127.0.0.1";
         const socket = new WebSocket(`ws://${host}:${backendPort}/ws`);
-        
+
         const canvas = document.createElement('canvas');
-        // Базовые значения, которые перезапишутся реальным разрешением камеры
-        canvas.width = 640; 
+        // Фиксируем легкое разрешение для нейросетей и быстрой отправки
+        canvas.width = 640;
         canvas.height = 480;
         const ctx = canvas.getContext('2d');
-        
-        let isStreaming = false;
 
-        // Рендер полосок статистики
+        let isStreaming = false;
+        let isWaitingForServer = false; // Флаг для синхронизации отправки кадров
+
+        // Рендер полосок статистики (глобальная панель)
         Object.keys(translations).forEach(key => {
             emotionList.innerHTML += `
                 <div class="emotion-row">
@@ -157,84 +158,149 @@
             `;
         });
 
-        socket.onopen = () => { statusEl.innerText = "● ONLINE"; statusEl.style.color = "#22c55e"; };
-        socket.onclose = () => { statusEl.innerText = "● OFFLINE"; statusEl.style.color = "#ef4444"; };
+        socket.onopen = () => { statusEl.innerText = "● ONLINE"; statusEl.style.color = "var(--success)"; };
+        socket.onclose = () => { statusEl.innerText = "● OFFLINE"; statusEl.style.color = "var(--danger)"; };
 
         socket.onmessage = (event) => {
+            isWaitingForServer = false; // РАЗБЛОКИРУЕМ СРАЗУ, как получили ответ
+            const start = performance.now();
+
             const data = JSON.parse(event.data);
-            if (data.success) {
-                // Динамическое масштабирование под реальный размер окна и камеры
-                const winW = window.innerWidth;
-                const winH = window.innerHeight;
-                
-                const scale = Math.max(winW / canvas.width, winH / canvas.height);
-                
-                const scaledW = canvas.width * scale;
-                const scaledH = canvas.height * scale;
-                
-                const offsetX = (winW - scaledW) / 2;
-                const offsetY = (winH - scaledH) / 2;
+            if (!data.success || !data.faces) return;
 
-                const [bx, by, bw, bh] = data.box;
-                const mirroredX = canvas.width - bx - bw; // Зеркалим относительно реальной ширины камеры
+            const winW = window.innerWidth;
+            const winH = window.innerHeight;
+            const scale = Math.max(winW / canvas.width, winH / canvas.height);
+            const scaledW = canvas.width * scale;
+            const scaledH = canvas.height * scale;
+            const offsetX = (winW - scaledW) / 2;
+            const offsetY = (winH - scaledH) / 2;
 
-                faceBox.style.display = 'block';
-                faceBox.style.left = (offsetX + mirroredX * scale) + 'px';
-                faceBox.style.top = (offsetY + by * scale) + 'px';
-                faceBox.style.width = (bw * scale) + 'px';
-                faceBox.style.height = (bh * scale) + 'px';
+            // Отслеживаем активные лица, чтобы удалить пропавшие
+            const activeFaceIds = new Set();
 
-                // Обновляем HUD
-                hudEmotion.innerText = translations[data.emotion].toUpperCase();
-                hudPhrase.innerText = phrases[data.emotion];
-                hudConf.innerText = data.confidence + '%';
+            data.faces.forEach((face, index) => {
+                activeFaceIds.add(face.id);
 
-                // Обновляем полоски
-                for (const [key, value] of Object.entries(data.all_emotions)) {
-                    const el = document.getElementById(`bar-${key}`);
-                    if(el) {
-                        el.style.width = value + '%';
-                        document.getElementById(`val-${key}`).innerText = value + '%';
+                // Ищем или создаем DOM-элемент для лица
+                let faceEl = document.getElementById(`face-${face.id}`);
+                if (!faceEl) {
+                    faceEl = document.createElement('div');
+                    faceEl.id = `face-${face.id}`;
+                    faceEl.className = 'face-box';
+                    faceEl.innerHTML = `
+                        <div class="face-hud">
+                            <span class="hud-id">СУБЪЕКТ ${face.id.substring(0,4).toUpperCase()} • <span class="hud-conf">0%</span></span>
+                            <span class="hud-emotion">ПОИСК...</span>
+                            <span class="hud-phrase">Анализирую данные</span>
+                        </div>
+                    `;
+                    facesContainer.appendChild(faceEl);
+                }
+
+                // Математика координат (с учетом отзеркаливания)
+                const [bx, by, bw, bh] = face.box;
+                const mirroredX = canvas.width - bx - bw;
+
+                faceEl.style.left = (offsetX + mirroredX * scale) + 'px';
+                faceEl.style.top = (offsetY + by * scale) + 'px';
+                faceEl.style.width = (bw * scale) + 'px';
+                faceEl.style.height = (bh * scale) + 'px';
+
+                // Обновляем текст в HUD
+                faceEl.querySelector('.hud-emotion').innerText = translations[face.emotion].toUpperCase();
+                faceEl.querySelector('.hud-phrase').innerText = phrases[face.emotion];
+                faceEl.querySelector('.hud-conf').innerText = face.confidence + '%';
+
+                // Обновляем глобальную панель статистики (по первому найденному лицу)
+                if (index === 0) {
+                    for (const [key, value] of Object.entries(face.all_emotions)) {
+                        const barEl = document.getElementById(`bar-${key}`);
+                        if(barEl) {
+                            barEl.style.width = value + '%';
+                            document.getElementById(`val-${key}`).innerText = value + '%';
+                        }
                     }
                 }
-            } else {
-                faceBox.style.display = 'none';
-            }
-            if(isStreaming) sendFrame();
+            });
+
+            // Удаляем рамки людей, которые ушли из кадра
+            Array.from(facesContainer.children).forEach(child => {
+                const id = child.id.replace('face-', '');
+                if (!activeFaceIds.has(id)) {
+                    child.remove();
+                }
+            });
+            const end = performance.now();
+            console.log(`Latency: ${(end - start).toFixed(2)}ms`);
         };
 
-        function sendFrame() {
-            // Рисуем на холст с динамическим (родным) разрешением камеры
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            canvas.toBlob(blob => {
-                if(socket.readyState === WebSocket.OPEN) socket.send(blob);
-            }, 'image/jpeg', 0.5);
-        }
+
+        // В функции sendFrameLoop:
+        function sendFrameLoop() {
+            if (!isStreaming) return;
+
+            // Если сервер еще не обработал предыдущий кадр, просто ждем
+            if (!isWaitingForServer) {
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                canvas.toBlob(blob => {
+                    isWaitingForServer = true; // Блокируем отправку новых кадров
+                    socket.send(blob);
+                }, 'image/jpeg', 0.5); // Качество 0.5 — оптимально для баланса скорости/точности
+            }
+
+    // Запускаем цикл снова
+    requestAnimationFrame(sendFrameLoop);
+}
 
         startBtn.addEventListener('click', async () => {
             if (!isStreaming) {
-                // Запрашиваем идеальное широкое разрешение
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" } 
-                });
-                video.srcObject = stream;
-                
-                // Как только видео загрузится, подстраиваем canvas под реальный формат
-                video.onloadedmetadata = () => {
-                    canvas.width = video.videoWidth;
-                    canvas.height = video.videoHeight;
-                };
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        video: { width: { ideal: 1920 }, height: { ideal: 1080 }, facingMode: "user" }
+                    });
+                    video.srcObject = stream;
+                    video.style.opacity = '1';
 
-                isStreaming = true;
-                startBtn.innerText = "Остановить";
-                startBtn.style.background = "#ef4444";
-                sendFrame();
+                    video.onloadedmetadata = () => {
+                        // Жестко фиксируем размер отправляемого кадра
+                        canvas.width = 640;
+                        canvas.height = 480;
+
+                        isStreaming = true;
+                        isWaitingForServer = false;
+                        startBtn.innerText = "Остановить систему";
+                        startBtn.style.background = "var(--danger)";
+                        sendFrameLoop();
+                    };
+                } catch (err) {
+                    console.error("Ошибка доступа к камере:", err);
+                    alert("Проверьте разрешение на использование камеры.");
+                }
             } else {
+                // Логика остановки системы
                 isStreaming = false;
-                video.srcObject.getTracks().forEach(t => t.stop());
-                startBtn.innerText = "Старт сканирования";
+
+                // Выключаем видеопоток
+                const tracks = video.srcObject?.getTracks();
+                if (tracks) tracks.forEach(t => t.stop());
+                video.srcObject = null;
+                video.style.opacity = '0'; // Плавно скрываем камеру
+
+                // Восстанавливаем кнопку
+                startBtn.innerText = "Старт системы";
                 startBtn.style.background = "var(--primary)";
-                faceBox.style.display = 'none';
+
+                // Очищаем AR-рамки с экрана
+                facesContainer.innerHTML = '';
+
+                // Сбрасываем все прогресс-барыф в ноль
+                Object.keys(translations).forEach(key => {
+                    const barEl = document.getElementById(`bar-${key}`);
+                    const valEl = document.getElementById(`val-${key}`);
+                    if(barEl) barEl.style.width = '0%';
+                    if(valEl) valEl.innerText = '0%';
+                });
             }
         });
     </script>
