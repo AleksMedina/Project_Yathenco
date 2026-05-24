@@ -162,78 +162,87 @@
         socket.onclose = () => { statusEl.innerText = "● OFFLINE"; statusEl.style.color = "var(--danger)"; };
 
         socket.onmessage = (event) => {
-            isWaitingForServer = false; // РАЗБЛОКИРУЕМ СРАЗУ, как получили ответ
-            const start = performance.now();
+    const start = performance.now(); // Объявляем старт здесь
+    isWaitingForServer = false;
+    const data = JSON.parse(event.data);
+    if (!data.success || !data.faces) return;
 
-            const data = JSON.parse(event.data);
-            if (!data.success || !data.faces) return;
+    // 1. Статус калибровки
+    const isCalibrating = data.faces.length > 0 && data.faces[0].calibrating;
+    const statusEl = document.getElementById('status');
+    if (isCalibrating) {
+        statusEl.innerText = "● КАЛИБРОВКА...";
+        statusEl.style.color = "orange";
+    } else {
+        statusEl.innerText = "● ONLINE";
+        statusEl.style.color = "var(--success)";
+    }
 
-            const winW = window.innerWidth;
-            const winH = window.innerHeight;
-            const scale = Math.max(winW / canvas.width, winH / canvas.height);
-            const scaledW = canvas.width * scale;
-            const scaledH = canvas.height * scale;
-            const offsetX = (winW - scaledW) / 2;
-            const offsetY = (winH - scaledH) / 2;
+    const winW = window.innerWidth;
+    const winH = window.innerHeight;
+    const scale = Math.max(winW / canvas.width, winH / canvas.height);
+    const scaledW = canvas.width * scale;
+    const scaledH = canvas.height * scale;
+    const offsetX = (winW - scaledW) / 2;
+    const offsetY = (winH - scaledH) / 2;
 
-            // Отслеживаем активные лица, чтобы удалить пропавшие
-            const activeFaceIds = new Set();
+    const activeFaceIds = new Set();
 
-            data.faces.forEach((face, index) => {
-                activeFaceIds.add(face.id);
+    // 2. Обработка лиц
+    data.faces.forEach((face, index) => {
+        activeFaceIds.add(face.id);
 
-                // Ищем или создаем DOM-элемент для лица
-                let faceEl = document.getElementById(`face-${face.id}`);
-                if (!faceEl) {
-                    faceEl = document.createElement('div');
-                    faceEl.id = `face-${face.id}`;
-                    faceEl.className = 'face-box';
-                    faceEl.innerHTML = `
-                        <div class="face-hud">
-                            <span class="hud-id">СУБЪЕКТ ${face.id.substring(0,4).toUpperCase()} • <span class="hud-conf">0%</span></span>
-                            <span class="hud-emotion">ПОИСК...</span>
-                            <span class="hud-phrase">Анализирую данные</span>
-                        </div>
-                    `;
-                    facesContainer.appendChild(faceEl);
+        let faceEl = document.getElementById(`face-${face.id}`);
+        if (!faceEl) {
+            faceEl = document.createElement('div');
+            faceEl.id = `face-${face.id}`;
+            faceEl.className = 'face-box';
+            faceEl.innerHTML = `
+                <div class="face-hud">
+                    <span class="hud-id">СУБЪЕКТ ${face.id.substring(0,4).toUpperCase()}</span>
+                    <span class="hud-emotion">ПОИСК...</span>
+                    <span class="hud-phrase"></span>
+                </div>
+            `;
+            facesContainer.appendChild(faceEl);
+        }
+
+        const [bx, by, bw, bh] = face.box;
+        const mirroredX = canvas.width - bx - bw;
+
+        faceEl.style.left = (offsetX + mirroredX * scale) + 'px';
+        faceEl.style.top = (offsetY + by * scale) + 'px';
+        faceEl.style.width = (bw * scale) + 'px';
+        faceEl.style.height = (bh * scale) + 'px';
+
+        if (isCalibrating) {
+            faceEl.querySelector('.hud-emotion').innerText = "КАЛИБРОВКА";
+            faceEl.querySelector('.hud-phrase').innerText = "Пожалуйста, не двигайтесь...";
+        } else {
+            faceEl.querySelector('.hud-emotion').innerText = translations[face.emotion].toUpperCase();
+            faceEl.querySelector('.hud-phrase').innerText = phrases[face.emotion];
+        }
+
+        if (index === 0 && !isCalibrating) {
+            for (const [key, value] of Object.entries(face.all_emotions)) {
+                const barEl = document.getElementById(`bar-${key}`);
+                if(barEl) {
+                    barEl.style.width = value + '%';
+                    document.getElementById(`val-${key}`).innerText = value + '%';
                 }
+            }
+        }
+    });
 
-                // Математика координат (с учетом отзеркаливания)
-                const [bx, by, bw, bh] = face.box;
-                const mirroredX = canvas.width - bx - bw;
+    // 3. Удаление старых рамок (только один раз!)
+    Array.from(facesContainer.children).forEach(child => {
+        const id = child.id.replace('face-', '');
+        if (!activeFaceIds.has(id)) child.remove();
+    });
 
-                faceEl.style.left = (offsetX + mirroredX * scale) + 'px';
-                faceEl.style.top = (offsetY + by * scale) + 'px';
-                faceEl.style.width = (bw * scale) + 'px';
-                faceEl.style.height = (bh * scale) + 'px';
-
-                // Обновляем текст в HUD
-                faceEl.querySelector('.hud-emotion').innerText = translations[face.emotion].toUpperCase();
-                faceEl.querySelector('.hud-phrase').innerText = phrases[face.emotion];
-                faceEl.querySelector('.hud-conf').innerText = face.confidence + '%';
-
-                // Обновляем глобальную панель статистики (по первому найденному лицу)
-                if (index === 0) {
-                    for (const [key, value] of Object.entries(face.all_emotions)) {
-                        const barEl = document.getElementById(`bar-${key}`);
-                        if(barEl) {
-                            barEl.style.width = value + '%';
-                            document.getElementById(`val-${key}`).innerText = value + '%';
-                        }
-                    }
-                }
-            });
-
-            // Удаляем рамки людей, которые ушли из кадра
-            Array.from(facesContainer.children).forEach(child => {
-                const id = child.id.replace('face-', '');
-                if (!activeFaceIds.has(id)) {
-                    child.remove();
-                }
-            });
-            const end = performance.now();
-            console.log(`Latency: ${(end - start).toFixed(2)}ms`);
-        };
+    const end = performance.now();
+    console.log(`Latency: ${(end - start).toFixed(2)}ms`);
+};
 
 
         // В функции sendFrameLoop:
