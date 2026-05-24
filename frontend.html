@@ -114,10 +114,10 @@
         };
 
         const phrases = {
-            'neutral': 'Полный дзен 🧘‍♂️', 'happy': 'Отличное настроение! ✨', 
-            'surprise': 'Ничего себе! 😲', 'sad': 'Всё будет хорошо 🧡', 
-            'angry': 'Дыши глубже 🌪️', 'disgust': 'Что-то не так? 🤔',
-            'fear': 'Система на защите 🛡️', 'contempt': 'Хитрый взгляд 😏'
+            'neutral': 'Спокойствие. Только кофе. И никаких дедлайнов.', 'happy': 'Стипендия пришла! Гуляем', 
+            'surprise': 'Это что, автомат?!', 'sad': 'Система висит, я тоже.', 
+            'angry': 'Всё. Хватит. Ухожу в лес, жить с белками.', 'disgust': 'Это не кофе, это слезы первокурсника.',
+            'fear': 'Система на защите 🛡️', 'contempt': 'Твои аргументы слабее моей отмазки.'
         };
 
         const video = document.getElementById('video');
@@ -131,7 +131,10 @@
         const statusEl = document.getElementById('status');
         const emotionList = document.getElementById('emotion-list');
 
-        const socket = new WebSocket("ws://127.0.0.1:8000/ws");
+        // Автоматически определяем адрес сервера
+        const backendPort = "8000"; // Порт твоего бэкенда
+        const host = window.location.hostname; // Это будет 127.0.0.1 или IP твоего компа
+        const socket = new WebSocket(`ws://${host}:${backendPort}/ws`);
         
         const canvas = document.createElement('canvas');
         // Базовые значения, которые перезапишутся реальным разрешением камеры
