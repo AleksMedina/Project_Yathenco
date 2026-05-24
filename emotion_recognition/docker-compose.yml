@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  emotion_system:
+    build: .
+    container_name: ar_emotion_backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped

@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AR Emotion System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        #video { transform: scaleX(-1); }
+        .hud-glass { background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(12px); }
+        .progress-bar { transition: width 0.2s ease-out; }
+    </style>
+</head>
+<body class="bg-slate-50 overflow-hidden h-screen w-screen relative">
+
+    <div class="absolute inset-0 z-0 flex items-center justify-center bg-slate-100">
+        <video id="video" autoplay playsinline class="w-full h-full object-cover opacity-0 transition-opacity duration-500"></video>
+        <div id="faces-container" class="absolute inset-0 pointer-events-none z-10"></div>
+    </div>
+
+    <div class="absolute bottom-8 right-8 z-20 hud-glass border border-white/80 rounded-2xl p-6 shadow-2xl w-96 text-slate-900">
+        <div class="flex justify-between items-center mb-6">
+            <button id="startBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold shadow-lg shadow-blue-500/30 transition-all active:scale-95">
+                Старт системы
+            </button>
+            <div class="text-right">
+                <div id="status" class="text-sm font-extrabold text-red-500 tracking-wider">● OFFLINE</div>
+                <div id="fps-counter" class="text-xs font-bold text-slate-500 mt-1">FPS: 0 | Latency: 0ms</div>
+            </div>
+        </div>
+        <div id="emotion-list" class="space-y-3"></div>
+    </div>
+
+    <script>
+        const translations = {
+            'neutral': 'Спокойствие', 'happy': 'Радость', 'surprise': 'Удивление',
+            'sad': 'Грусть', 'angry': 'Злость', 'disgust': 'Отвращение',
+            'fear': 'Страх', 'contempt': 'Презрение'
+        };
+
+        const phrases = {
+            'neutral': 'Только кофе. И никаких дедлайнов.', 'happy': 'Код скомпилировался!',
+            'surprise': 'Это что, работает?!', 'sad': 'Ошибка сегментации...',
+            'angry': 'Опять баг с плавающей точкой.', 'disgust': 'Грязный хак в коде.',
+            'fear': 'Завтра дедлайн 🛡️', 'contempt': 'Твои аргументы слишком слабы.'
+        };
+
+        const video = document.getElementById('video');
+        const startBtn = document.getElementById('startBtn');
+        const facesContainer = document.getElementById('faces-container');
+        const statusEl = document.getElementById('status');
+        const emotionList = document.getElementById('emotion-list');
+        const fpsCounter = document.getElementById('fps-counter');
+
+        const canvas = document.createElement('canvas');
+        canvas.width = 640; canvas.height = 480;
+        const ctx = canvas.getContext('2d');
+
+        let socket, isStreaming = false, isWaitingForServer = false;
+        let frameCount = 0, lastFpsTime = Date.now();
+
+        // Инициализация прогресс-баров
+        Object.keys(translations).forEach(key => {
+            emotionList.innerHTML += `
+                <div>
+                    <div class="flex justify-between text-sm font-bold mb-1">
+                        <span class="text-slate-700">${translations[key]}</span>
+                        <span id="val-${key}" class="text-blue-600">0%</span>
+                    </div>
+                    <div class="h-2 bg-slate-200 rounded-full overflow-hidden">
+                        <div id="bar-${key}" class="progress-bar h-full bg-blue-500 w-0"></div>
+                    </div>
+                </div>
+            `;
+        });
+
+        function connectWebSocket() {
+            socket = new WebSocket(`ws://${window.location.hostname || "127.0.0.1"}:8000/ws`);
+
+            socket.onopen = () => {
+                statusEl.innerText = "● ONLINE";
+                statusEl.classList.replace('text-red-500', 'text-emerald-500');
+            };
+            socket.onclose = () => {
+                statusEl.innerText = "● ПЕРЕПОДКЛЮЧЕНИЕ...";
+                statusEl.classList.replace('text-emerald-500', 'text-orange-500');
+                setTimeout(connectWebSocket, 2000);
+            };
+
+            socket.onmessage = (event) => {
+                // ДОБАВЛЕННАЯ ПРОВЕРКА: Если стрим остановлен, игнорируем запоздалые кадры и очищаем контейнер
+                if (!isStreaming) {
+                    facesContainer.innerHTML = '';
+                    return;
+                }
+
+                isWaitingForServer = false;
+                frameCount++
+                const data = JSON.parse(event.data);
+
+                if (!data.success) return;
+
+                // 2. ТОЛЬКО ПОТОМ обновляем счетчики, используя расшифрованную data
+                const now = Date.now();
+                if (now - lastFpsTime >= 1000) {
+                    fpsCounter.innerText = `FPS: ${frameCount} | Latency: ${data.process_time_ms || 0}ms`;
+                    frameCount = 0; lastFpsTime = now;
+                }
+
+                if (!data.success || !data.faces?.length) {
+                    facesContainer.innerHTML = '';
+                    return;
+                }
+
+                const scale = Math.max(window.innerWidth / canvas.width, window.innerHeight / canvas.height);
+                const offsetX = (window.innerWidth - canvas.width * scale) / 2;
+                const offsetY = (window.innerHeight - canvas.height * scale) / 2;
+
+                const activeFaceIds = new Set();
+
+                data.faces.forEach((face, index) => {
+                    activeFaceIds.add(face.id);
+                    let faceEl = document.getElementById(`face-${face.id}`);
+
+                    if (!faceEl) {
+                        faceEl = document.createElement('div');
+                        faceEl.id = `face-${face.id}`;
+                        faceEl.className = 'absolute border-4 border-blue-500 rounded-lg shadow-[0_0_20px_rgba(59,130,246,0.5)]';
+                        faceEl.innerHTML = `
+                            <div class="absolute top-[10%] left-[calc(100%+20px)] hud-glass border-l-4 border-blue-500 p-4 rounded-xl shadow-lg w-56 flex flex-col gap-1">
+                                <span class="text-[10px] font-bold text-slate-500 tracking-wider">СУБЪЕКТ ${face.id.substring(0,4).toUpperCase()}</span>
+                                <span class="hud-emotion text-2xl font-black text-blue-600 leading-none uppercase">...</span>
+                                <span class="hud-phrase text-sm font-semibold text-slate-800 italic mt-1"></span>
+                            </div>
+                        `;
+                        facesContainer.appendChild(faceEl);
+                    }
+
+                    const [bx, by, bw, bh] = face.box;
+                    faceEl.style.left = `${offsetX + bx * scale}px`;
+                    faceEl.style.top = `${offsetY + by * scale}px`;
+                    faceEl.style.width = `${bw * scale}px`;
+                    faceEl.style.height = `${bh * scale}px`;
+
+                    faceEl.querySelector('.hud-emotion').innerText = translations[face.emotion];
+                    faceEl.querySelector('.hud-phrase').innerText = phrases[face.emotion];
+
+                    if (index === 0) {
+                        for (const [key, value] of Object.entries(face.all_emotions)) {
+                            const bar = document.getElementById(`bar-${key}`);
+                            const val = document.getElementById(`val-${key}`);
+                            if(bar) { bar.style.width = `${value}%`; val.innerText = `${value}%`; }
+                        }
+                    }
+                });
+
+                Array.from(facesContainer.children).forEach(child => {
+                    if (!activeFaceIds.has(child.id.replace('face-', ''))) child.remove();
+                });
+            };
+        }
+
+        connectWebSocket();
+
+        function sendFrameLoop() {
+            if (!isStreaming) return;
+            if (!isWaitingForServer && socket.readyState === WebSocket.OPEN) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.save(); ctx.scale(-1, 1);
+                ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+                ctx.restore();
+
+                canvas.toBlob(blob => {
+                    isWaitingForServer = true;
+                    socket.send(blob);
+                }, 'image/jpeg', 0.5);
+            }
+            requestAnimationFrame(sendFrameLoop);
+        }
+
+        startBtn.addEventListener('click', async () => {
+            if (!isStreaming) {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" } });
+                    video.srcObject = stream; video.classList.replace('opacity-0', 'opacity-100');
+                    video.onloadedmetadata = () => {
+                        isStreaming = true; isWaitingForServer = false;
+                        startBtn.innerText = "Остановить";
+                        startBtn.classList.replace('bg-blue-600', 'bg-red-500');
+                        startBtn.classList.replace('hover:bg-blue-700', 'hover:bg-red-600');
+                        startBtn.classList.replace('shadow-blue-500/30', 'shadow-red-500/30');
+                        sendFrameLoop();
+                    };
+                } catch (err) { alert("Ошибка доступа к камере."); }
+            } else {
+                isStreaming = false;
+                video.srcObject?.getTracks().forEach(t => t.stop());
+                video.srcObject = null; video.classList.replace('opacity-100', 'opacity-0');
+                startBtn.innerText = "Старт системы";
+                startBtn.classList.replace('bg-red-500', 'bg-blue-600');
+                startBtn.classList.replace('hover:bg-red-600', 'hover:bg-blue-700');
+                startBtn.classList.replace('shadow-red-500/30', 'shadow-blue-500/30');
+                facesContainer.innerHTML = '';
+            }
+        });
+    </script>
+</body>
+</html>
