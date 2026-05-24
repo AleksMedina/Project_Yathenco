@@ -18,7 +18,7 @@
         body, html {
             margin: 0; padding: 0; width: 100%; height: 100%;
             font-family: 'Segoe UI', Roboto, Helvetica, sans-serif;
-            overflow: hidden; background: #f8fafc; /* Светлый фон вместо черного */
+            overflow: hidden; background: #f8fafc;
         }
 
         /* Полноэкранное видео */
@@ -26,15 +26,15 @@
             position: fixed; top: 0; left: 0;
             width: 100vw; height: 100vh;
             z-index: 1; display: flex; justify-content: center; align-items: center;
-            background: #f8fafc; /* Фон, который остается при выключенной камере */
+            background: #f8fafc;
         }
 
         #video {
             width: 100vw; height: 100vh;
             object-fit: cover;
-            transform: scaleX(-1); /* Зеркальность */
-            transition: opacity 0.5s ease; /* Плавное появление/исчезновение */
-            opacity: 0; /* По умолчанию скрыто */
+            transform: scaleX(-1); /* Визуальная зеркальность для пользователя */
+            transition: opacity 0.5s ease;
+            opacity: 0;
         }
 
         /* Контейнер для динамических лиц */
@@ -47,10 +47,9 @@
         /* Динамическая AR-Рамка */
         .face-box {
             position: absolute;
-            border: 3px solid var(--primary); /* Утолщенная рамка для больших экранов */
+            border: 3px solid var(--primary);
             box-shadow: 0 0 20px var(--primary-glow);
             border-radius: 12px;
-            /* transition: all 0.1s ease-out; */ /* Плавное движение рамки */
         }
 
         .face-box::before, .face-box::after {
@@ -134,18 +133,17 @@
 
         const backendPort = "8000";
         const host = window.location.hostname || "127.0.0.1";
-        const socket = new WebSocket(`ws://${host}:${backendPort}/ws`);
+        let socket; // Сделали изменяемой для авто-реконнекта
 
         const canvas = document.createElement('canvas');
-        // Фиксируем легкое разрешение для нейросетей и быстрой отправки
         canvas.width = 640;
         canvas.height = 480;
         const ctx = canvas.getContext('2d');
 
         let isStreaming = false;
-        let isWaitingForServer = false; // Флаг для синхронизации отправки кадров
+        let isWaitingForServer = false;
 
-        // Рендер полосок статистики (глобальная панель)
+        // Рендер полосок статистики
         Object.keys(translations).forEach(key => {
             emotionList.innerHTML += `
                 <div class="emotion-row">
@@ -158,109 +156,129 @@
             `;
         });
 
-        socket.onopen = () => { statusEl.innerText = "● ONLINE"; statusEl.style.color = "var(--success)"; };
-        socket.onclose = () => { statusEl.innerText = "● OFFLINE"; statusEl.style.color = "var(--danger)"; };
+        // Функция подключения WebSocket (с авто-восстановлением)
+        function connectWebSocket() {
+            socket = new WebSocket(`ws://${host}:${backendPort}/ws`);
 
-        socket.onmessage = (event) => {
-    const start = performance.now(); // Объявляем старт здесь
-    isWaitingForServer = false;
-    const data = JSON.parse(event.data);
-    if (!data.success || !data.faces) return;
+            socket.onopen = () => {
+                statusEl.innerText = "● ONLINE";
+                statusEl.style.color = "var(--success)";
+            };
 
-    // 1. Статус калибровки
-    const isCalibrating = data.faces.length > 0 && data.faces[0].calibrating;
-    const statusEl = document.getElementById('status');
-    if (isCalibrating) {
-        statusEl.innerText = "● КАЛИБРОВКА...";
-        statusEl.style.color = "orange";
-    } else {
-        statusEl.innerText = "● ONLINE";
-        statusEl.style.color = "var(--success)";
-    }
+            socket.onclose = () => {
+                statusEl.innerText = "● ПЕРЕПОДКЛЮЧЕНИЕ...";
+                statusEl.style.color = "orange";
+                setTimeout(connectWebSocket, 2000); // Пробуем снова через 2 секунды
+            };
 
-    const winW = window.innerWidth;
-    const winH = window.innerHeight;
-    const scale = Math.max(winW / canvas.width, winH / canvas.height);
-    const scaledW = canvas.width * scale;
-    const scaledH = canvas.height * scale;
-    const offsetX = (winW - scaledW) / 2;
-    const offsetY = (winH - scaledH) / 2;
+            socket.onmessage = (event) => {
+                isWaitingForServer = false;
+                const data = JSON.parse(event.data);
 
-    const activeFaceIds = new Set();
+                if (!data.success) return;
 
-    // 2. Обработка лиц
-    data.faces.forEach((face, index) => {
-        activeFaceIds.add(face.id);
-
-        let faceEl = document.getElementById(`face-${face.id}`);
-        if (!faceEl) {
-            faceEl = document.createElement('div');
-            faceEl.id = `face-${face.id}`;
-            faceEl.className = 'face-box';
-            faceEl.innerHTML = `
-                <div class="face-hud">
-                    <span class="hud-id">СУБЪЕКТ ${face.id.substring(0,4).toUpperCase()}</span>
-                    <span class="hud-emotion">ПОИСК...</span>
-                    <span class="hud-phrase"></span>
-                </div>
-            `;
-            facesContainer.appendChild(faceEl);
-        }
-
-        const [bx, by, bw, bh] = face.box;
-        const mirroredX = canvas.width - bx - bw;
-
-        faceEl.style.left = (offsetX + mirroredX * scale) + 'px';
-        faceEl.style.top = (offsetY + by * scale) + 'px';
-        faceEl.style.width = (bw * scale) + 'px';
-        faceEl.style.height = (bh * scale) + 'px';
-
-        if (isCalibrating) {
-            faceEl.querySelector('.hud-emotion').innerText = "КАЛИБРОВКА";
-            faceEl.querySelector('.hud-phrase').innerText = "Пожалуйста, не двигайтесь...";
-        } else {
-            faceEl.querySelector('.hud-emotion').innerText = translations[face.emotion].toUpperCase();
-            faceEl.querySelector('.hud-phrase').innerText = phrases[face.emotion];
-        }
-
-        if (index === 0 && !isCalibrating) {
-            for (const [key, value] of Object.entries(face.all_emotions)) {
-                const barEl = document.getElementById(`bar-${key}`);
-                if(barEl) {
-                    barEl.style.width = value + '%';
-                    document.getElementById(`val-${key}`).innerText = value + '%';
+                // Если лиц нет, очищаем экран и выходим
+                if (!data.faces || data.faces.length === 0) {
+                    facesContainer.innerHTML = '';
+                    return;
                 }
-            }
+
+                const isCalibrating = data.faces[0].calibrating;
+                if (isCalibrating) {
+                    statusEl.innerText = "● КАЛИБРОВКА...";
+                    statusEl.style.color = "orange";
+                } else {
+                    statusEl.innerText = "● ONLINE";
+                    statusEl.style.color = "var(--success)";
+                }
+
+                const winW = window.innerWidth;
+                const winH = window.innerHeight;
+                const scale = Math.max(winW / canvas.width, winH / canvas.height);
+                const scaledW = canvas.width * scale;
+                const scaledH = canvas.height * scale;
+                const offsetX = (winW - scaledW) / 2;
+                const offsetY = (winH - scaledH) / 2;
+
+                const activeFaceIds = new Set();
+
+                data.faces.forEach((face, index) => {
+                    activeFaceIds.add(face.id);
+
+                    let faceEl = document.getElementById(`face-${face.id}`);
+                    if (!faceEl) {
+                        faceEl = document.createElement('div');
+                        faceEl.id = `face-${face.id}`;
+                        faceEl.className = 'face-box';
+                        faceEl.innerHTML = `
+                            <div class="face-hud">
+                                <span class="hud-id">СУБЪЕКТ ${face.id.substring(0,4).toUpperCase()}</span>
+                                <span class="hud-emotion">ПОИСК...</span>
+                                <span class="hud-phrase"></span>
+                            </div>
+                        `;
+                        facesContainer.appendChild(faceEl);
+                    }
+
+                    const [bx, by, bw, bh] = face.box;
+
+                    // Зеркальное смещение больше не нужно, кадр отзеркален до отправки
+                    faceEl.style.left = (offsetX + bx * scale) + 'px';
+                    faceEl.style.top = (offsetY + by * scale) + 'px';
+                    faceEl.style.width = (bw * scale) + 'px';
+                    faceEl.style.height = (bh * scale) + 'px';
+
+                    if (isCalibrating) {
+                        faceEl.querySelector('.hud-emotion').innerText = "КАЛИБРОВКА";
+                        faceEl.querySelector('.hud-phrase').innerText = "Пожалуйста, не двигайтесь...";
+                    } else {
+                        faceEl.querySelector('.hud-emotion').innerText = translations[face.emotion].toUpperCase();
+                        faceEl.querySelector('.hud-phrase').innerText = phrases[face.emotion];
+                    }
+
+                    if (index === 0 && !isCalibrating) {
+                        for (const [key, value] of Object.entries(face.all_emotions)) {
+                            const barEl = document.getElementById(`bar-${key}`);
+                            if(barEl) {
+                                barEl.style.width = value + '%';
+                                document.getElementById(`val-${key}`).innerText = value + '%';
+                            }
+                        }
+                    }
+                });
+
+                // Удаление старых рамок
+                Array.from(facesContainer.children).forEach(child => {
+                    const id = child.id.replace('face-', '');
+                    if (!activeFaceIds.has(id)) child.remove();
+                });
+            };
         }
-    });
 
-    // 3. Удаление старых рамок (только один раз!)
-    Array.from(facesContainer.children).forEach(child => {
-        const id = child.id.replace('face-', '');
-        if (!activeFaceIds.has(id)) child.remove();
-    });
+        // Запускаем подключение при загрузке страницы
+        connectWebSocket();
 
-    const end = performance.now();
-    console.log(`Latency: ${(end - start).toFixed(2)}ms`);
-};
-
-
-        // В функции sendFrameLoop:
         function sendFrameLoop() {
             if (!isStreaming) return;
 
-            // Если сервер еще не обработал предыдущий кадр, просто ждем
-            if (!isWaitingForServer) {
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            // Проверяем, что сервер готов и сокет открыт
+            if (!isWaitingForServer && socket.readyState === WebSocket.OPEN) {
+
+                // Программное отзеркаливание перед отправкой на сервер
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.save();
+                ctx.scale(-1, 1);
+                ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+                ctx.restore();
+
                 canvas.toBlob(blob => {
-                    isWaitingForServer = true; // Блокируем отправку новых кадров
+                    isWaitingForServer = true;
                     socket.send(blob);
-                }, 'image/jpeg', 0.5); // Качество 0.5 — оптимально для баланса скорости/точности
+                }, 'image/jpeg', 0.5);
             }
 
-    // Запускаем цикл снова
-    requestAnimationFrame(sendFrameLoop);
-}
+            requestAnimationFrame(sendFrameLoop);
+        }
 
         startBtn.addEventListener('click', async () => {
             if (!isStreaming) {
@@ -272,10 +290,6 @@
                     video.style.opacity = '1';
 
                     video.onloadedmetadata = () => {
-                        // Жестко фиксируем размер отправляемого кадра
-                        canvas.width = 640;
-                        canvas.height = 480;
-
                         isStreaming = true;
                         isWaitingForServer = false;
                         startBtn.innerText = "Остановить систему";
@@ -287,23 +301,18 @@
                     alert("Проверьте разрешение на использование камеры.");
                 }
             } else {
-                // Логика остановки системы
                 isStreaming = false;
 
-                // Выключаем видеопоток
                 const tracks = video.srcObject?.getTracks();
                 if (tracks) tracks.forEach(t => t.stop());
                 video.srcObject = null;
-                video.style.opacity = '0'; // Плавно скрываем камеру
+                video.style.opacity = '0';
 
-                // Восстанавливаем кнопку
                 startBtn.innerText = "Старт системы";
                 startBtn.style.background = "var(--primary)";
 
-                // Очищаем AR-рамки с экрана
                 facesContainer.innerHTML = '';
 
-                // Сбрасываем все прогресс-барыф в ноль
                 Object.keys(translations).forEach(key => {
                     const barEl = document.getElementById(`bar-${key}`);
                     const valEl = document.getElementById(`val-${key}`);

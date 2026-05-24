@@ -4,16 +4,19 @@ import logging
 import cv2
 import numpy as np
 import onnxruntime as ort
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket
 from concurrent.futures import ThreadPoolExecutor
 
-# Настройка логирования
+#  Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("EmotionSystem")
 
 app = FastAPI()
 
-# --- Конфигурация путей ---
+#  Глобальная переменная для REST API
+last_analysis_result = {"success": False, "error": "No data yet", "faces": []}
+
+#  Конфигурация путей
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 YUNET_PATH = os.path.join(BASE_DIR, "face_detection_yunet_2023mar.onnx")
 FER_PATH = os.path.join(BASE_DIR, "emotion-ferplus-8.onnx")
@@ -26,22 +29,20 @@ if not os.path.exists(YUNET_PATH) or not os.path.exists(FER_PATH):
 executor = ThreadPoolExecutor(max_workers=4)
 
 # Инициализация моделей
-# Фиксируем размер детектора для производительности
 detector = cv2.FaceDetectorYN.create(YUNET_PATH, "", (640, 480), score_threshold=0.6, nms_threshold=0.3)
 opts = ort.SessionOptions()
 opts.intra_op_num_threads = 2
-ort_session = ort.InferenceSession(FER_PATH, sess_options=opts)
+ort_session = ort.InferenceSession(FER_PATH, providers=['CPUExecutionProvider'], sess_options=opts)
 
-# Инициализация CLAHE для улучшения контраста микровыражений
+# Инициализация CLAHE
 clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
 
 emotions_list = ['neutral', 'happy', 'surprise', 'sad', 'angry', 'disgust', 'fear', 'contempt']
 INPUT_NAME = ort_session.get_inputs()[0].name
 
-# Обновленные коэффициенты EMA
+# Коэффициенты EMA
 ALPHA_PROBS = 0.9
 ALPHA_BOX = 0.9
-
 
 def get_iou(boxA, boxB):
     xA = max(boxA[0], boxB[0])
@@ -129,8 +130,17 @@ def process_frame_sync(frame_bytes, client_state):
         return {"success": False, "error": str(e)}
 
 
+# REST API
+@app.get("/api/v1/emotional")
+async def get_emotional_data():
+    """Возвращает последний результат анализа в формате JSON"""
+    return last_analysis_result
+
+
+# WebSocket API
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    global last_analysis_result
     await websocket.accept()
     frame_queue = asyncio.Queue(maxsize=1)
     client_state = {}
@@ -145,11 +155,17 @@ async def websocket_endpoint(websocket: WebSocket):
             pass
 
     async def process_and_send():
+        global last_analysis_result
         try:
             while True:
                 frame_bytes = await frame_queue.get()
-                result = await asyncio.get_running_loop().run_in_executor(executor, process_frame_sync, frame_bytes,
-                                                                          client_state)
+                result = await asyncio.get_running_loop().run_in_executor(
+                    executor, process_frame_sync, frame_bytes, client_state
+                )
+
+                # Сохраняем результат для REST API
+                last_analysis_result = result
+
                 await websocket.send_json(result)
         except:
             pass
@@ -159,4 +175,5 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         await asyncio.gather(producer, consumer)
     finally:
-        producer.cancel(); consumer.cancel()
+        producer.cancel()
+        consumer.cancel()
