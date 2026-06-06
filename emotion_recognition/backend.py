@@ -89,11 +89,10 @@ def process_frame_sync(frame_bytes, client_state):
                 raw_outputs = ort_session.run(None, {INPUT_NAME: input_tensor})[0][0]
 
                 # --- 1. СЧИТАЕМ СЫРЫЕ (ЧЕСТНЫЕ) ВЕРОЯТНОСТИ ---
-                # Смотрим, что модель видит на самом деле, без наших искажений
                 raw_probs = np.exp(raw_outputs - np.max(raw_outputs))
                 raw_probs /= raw_probs.sum()
 
-                # Копируем базовые смещения из конфига, чтобы изменять их на лету
+                # Копируем базовые смещения из конфига
                 dynamic_biases = biases.copy()
 
                 # ИНДЕКСЫ ЭМОЦИЙ:
@@ -101,38 +100,25 @@ def process_frame_sync(frame_bytes, client_state):
 
                 # --- 2. УМНЫЕ КРОСС-ШТРАФЫ И ФИЛЬТРЫ ---
 
-                # ПРАВИЛО А: Укрощение Презрения (Contempt - 7)
-                # Если сырая вероятность презрения ничтожно мала (< 2%), отключаем его огромный буст
-                if raw_probs[7] < 0.02:
-                    dynamic_biases[7] = 0.0
-                # Если на лице явное Отвращение(5) или Злость(4), и они сильнее Презрения — режем Презрение
-                elif (raw_probs[5] > 0.15 or raw_probs[4] > 0.15) and (
-                        raw_probs[5] > raw_probs[7] or raw_probs[4] > raw_probs[7]):
-                    dynamic_biases[7] -= 2.0
+                # ПРАВИЛО А: Полностью вырезаем Презрение (Contempt - 7)
+                dynamic_biases[7] = -100.0
 
-                # ПРАВИЛО Б: Укрощение Страха (Fear - 6)
-                # Страх часто путается с Удивлением(2). Если удивление доминирует, штрафуем страх.
-                if raw_probs[6] < 0.02:
-                    dynamic_biases[6] = 0.0
-                elif raw_probs[2] > 0.20 and raw_probs[2] > raw_probs[6]:
-                    dynamic_biases[6] -= 2.0
+                # ПРАВИЛО Б: Искусственный разгон Страха (Fear - 6)
+                if raw_probs[6] > 0.03:
+                    dynamic_biases[6] += 2.0
 
                 # ПРАВИЛО В: Возврат Спокойствия (Neutral - 0)
-                # У нас стоит базовый штраф на спокойствие (-0.8).
-                # Но если на лице вообще нет ярких эмоций (все сырые эмоции < 20%), мы убираем штраф,
-                # чтобы Спокойствие уверенно детектилось и лицо не "мерцало".
                 if np.max(raw_probs[1:]) < 0.20:
                     dynamic_biases[0] = 0.0
 
                 # --- 3. ИТОГОВЫЙ РАСЧЕТ ---
-                # Применяем наши динамические смещения к исходным логитам
                 adjusted_logits = raw_outputs + dynamic_biases
 
                 # Считаем классический Softmax от новых значений
                 probs = np.exp(adjusted_logits - np.max(adjusted_logits))
                 probs /= probs.sum()
 
-                # Сглаживание EMA (чтобы ползунки не дергались резко)
+                # Сглаживание EMA
                 if smoothed_probs is not None:
                     probs = config.ALPHA_PROBS * probs + (1 - config.ALPHA_PROBS) * smoothed_probs
 
@@ -144,7 +130,7 @@ def process_frame_sync(frame_bytes, client_state):
                     "emotion": emotions_list[max_idx],
                     "confidence": int(probs[max_idx] * 100),
                     "box": [int(smoothed_box[0]), int(smoothed_box[1]), int(smoothed_box[2]), int(smoothed_box[3])],
-                    "all_emotions": {em: int(p * 100) for em, p in zip(emotions_list, probs)}
+                    "all_emotions": {em: int(p * 100) for em, p in zip(emotions_list, probs) if em != 'contempt'}
                 })
 
         client_state.clear()
